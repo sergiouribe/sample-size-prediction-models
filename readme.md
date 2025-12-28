@@ -11,7 +11,7 @@ Sample size calculations for developing and validating AI-based prediction model
 | `03_validation_binary.qmd` | Validation | Binary | `pmvalsampsize` | Sample size to externally validate a binary prediction model |
 | `04_validation_continuous.qmd` | Validation | Continuous | `pmvalsampsize` | Sample size to externally validate a continuous prediction model |
 
-## Key Distinction
+## Note
 
 - **Development** (`pmsampsize`): Calculates sample size to build a model with minimal overfitting. Depends on number of predictor parameters.
 - **Validation** (`pmvalsampsize`): Calculates sample size to precisely estimate model performance (C-statistic, calibration). Independent of model complexity.
