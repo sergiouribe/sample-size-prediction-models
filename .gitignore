@@ -1,0 +1,22 @@
+# R specific
+.Rhistory
+.Rdata
+.httr-oauth
+.DS_Store
+.Rproj.user/
+
+# Output files
+output/
+
+# Session data
+.RData
+.Ruserdata
+
+# Temporary files
+*~
+\#*\#
+.\#*
+
+# OS files
+.DS_Store
+Thumbs.db

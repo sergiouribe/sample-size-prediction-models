@@ -1,0 +1,323 @@
+---
+title: "Sample Size for Model DEVELOPMENT: Continuous Outcome"
+subtitle: "Predicting number of new caries lesions in children"
+author: "Sergio Uribe"
+date: today
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    number-sections: true
+execute:
+  warning: false
+  message: false
+bibliography: references.bib
+---
+
+## Overview
+
+This document calculates the **minimum sample size required for DEVELOPING** a prediction model with a **continuous outcome**: the number of new caries lesions a child will develop over 2 years.
+
+**Purpose**: Model DEVELOPMENT requires sufficient sample size to build a reliable prediction equation that minimizes overfitting and produces accurate predictions when applied to new individuals.
+
+**Outcome definition**: Continuous: "Number of new caries lesions per child in 2 years"
+
+**R Package**: `pmsampsize` [@riley2020calculating]
+
+**Key criteria for development sample size** (Riley et al. 2020, Box 1):
+
+| Criterion | Description | Target |
+|-----------|-------------|--------|
+| C1 | Precise estimation of model intercept (mean outcome) | Small margin of error |
+| C2 | Precise estimation of residual variance | N >= 234 + P |
+| C3 | Small shrinkage factor to minimize overfitting | Shrinkage >= 0.90 |
+| C4 | Small optimism in apparent R² | Optimism <= 0.05 |
+
+## Setup
+
+```{r}
+#| label: setup
+
+if (!require("pacman", quietly = TRUE)) {
+ install.packages("pacman", repos = "https://cloud.r-project.org")
+}
+
+pacman::p_load(
+ pmsampsize,
+ tidyverse
+)
+```
+
+## Tunable Assumptions
+
+```{r}
+#| label: assumptions
+
+# =============================================================================
+# OUTCOME CHARACTERISTICS
+# =============================================================================
+
+# Mean number of new caries lesions expected over 2 years
+# Based on epidemiological data from moderate-risk populations
+# Uribe et al. (2021) reports 48% ECC prevalence globally
+# In affected children, mean dmft ranges from 2-5
+mean_new_lesions <- 1.8
+
+# Standard deviation of new lesions
+# Typically CV (coefficient of variation) around 1.0-1.5 for count data
+sd_new_lesions <- 2.2
+
+# =============================================================================
+# MODEL COMPLEXITY
+# =============================================================================
+
+# Number of candidate predictor PARAMETERS (not variables!)
+# Count each parameter:
+#   - Binary variable = 1 parameter
+#   - Categorical (k levels) = k-1 parameters
+#   - Continuous variable = 1 parameter (more if using splines)
+#   - Each interaction term = 1 parameter
+#
+# Example for caries lesion count prediction:
+#   Age (continuous) = 1
+#   Sex (binary) = 1
+#   Baseline dmft (continuous) = 1
+#   SES (3 categories) = 2
+#   Fluoride exposure (binary) = 1
+#   Brushing frequency (continuous) = 1
+#   Sugar intake (continuous) = 1
+#   S. mutans level (continuous) = 1
+#   Plaque index (continuous) = 1
+#   Salivary flow (continuous) = 1
+#   Parent caries (binary) = 1
+#   Dental visits (3 categories) = 2
+#   Total = 14 parameters
+candidate_parameters <- 14
+
+# =============================================================================
+# EXPECTED MODEL PERFORMANCE
+# =============================================================================
+
+# Anticipated R-squared (proportion of variance explained)
+# For caries prediction models, R² typically ranges 0.10-0.30
+# Use CONSERVATIVE (lower) estimates to ensure adequate sample size
+# Lower R² means more noise, harder to detect signal, need larger sample
+expected_rsquared <- 0.15
+
+# =============================================================================
+# OVERFITTING CONTROL
+# =============================================================================
+
+# Target shrinkage factor (controls maximum acceptable overfitting)
+#   0.90 = maximum 10% shrinkage (RECOMMENDED by Riley et al.)
+#   0.85 = allows 15% shrinkage
+#   0.95 = stricter, only 5% shrinkage allowed
+target_shrinkage <- 0.90
+```
+
+## Sample Size Calculation
+
+The `pmsampsize` function evaluates all four criteria (C1-C4) and returns the maximum.
+
+```{r}
+#| label: calculation
+
+dev_sample <- pmsampsize::pmsampsize(
+ type = "c",
+ rsquared = expected_rsquared,
+ parameters = candidate_parameters,
+ intercept = mean_new_lesions,
+ sd = sd_new_lesions,
+ shrinkage = target_shrinkage
+)
+
+dev_sample
+```
+
+## Results Interpretation
+
+```{r}
+#| label: results
+#| echo: false
+
+cat("============================================================\n")
+cat("MODEL DEVELOPMENT - CONTINUOUS OUTCOME\n")
+cat("Sample Size Requirements (Riley et al. 2020)\n")
+cat("============================================================\n\n")
+
+cat("MINIMUM SAMPLE SIZE:", dev_sample$sample_size, "participants\n")
+cat("PARTICIPANTS PER PARAMETER:", round(dev_sample$sample_size / candidate_parameters, 1), "\n\n")
+
+cat("Comparison with rules of thumb:\n")
+cat("  - Simple '2 per predictor' rule:", candidate_parameters * 2, "participants\n")
+cat("  - '20 per predictor' rule:", candidate_parameters * 20, "participants\n")
+cat("  - Riley criteria requirement:", dev_sample$sample_size, "participants\n")
+```
+
+## Detailed Criteria Results
+
+```{r}
+#| label: criteria-table
+
+# Display the results table directly from pmsampsize output
+knitr::kable(
+ dev_sample$results_table,
+ caption = "Sample size by criterion (maximum determines final requirement)"
+)
+```
+
+## Sensitivity Analysis
+
+### Varying Expected R²
+
+```{r}
+#| label: sensitivity-rsquared
+
+sensitivity_rsq <- tibble(
+ rsquared = c(0.05, 0.10, 0.15, 0.20, 0.25, 0.30)
+) |>
+ rowwise() |>
+ mutate(
+   result = list(pmsampsize::pmsampsize(
+     type = "c",
+     rsquared = rsquared,
+     parameters = candidate_parameters,
+     intercept = mean_new_lesions,
+     sd = sd_new_lesions,
+     shrinkage = target_shrinkage
+   )),
+   min_n = result$sample_size,
+   per_param = round(min_n / candidate_parameters, 1)
+ ) |>
+ ungroup() |>
+ select(rsquared, min_n, per_param)
+
+knitr::kable(
+ sensitivity_rsq,
+ caption = "Development sample size by expected R-squared (lower = more conservative)",
+ col.names = c("R-squared", "Min N", "Per Parameter")
+)
+```
+
+### Varying Number of Parameters
+
+```{r}
+#| label: sensitivity-params
+
+sensitivity_params <- tibble(
+ parameters = c(8, 10, 14, 18, 22, 26, 30)
+) |>
+ rowwise() |>
+ mutate(
+   result = list(pmsampsize::pmsampsize(
+     type = "c",
+     rsquared = expected_rsquared,
+     parameters = parameters,
+     intercept = mean_new_lesions,
+     sd = sd_new_lesions,
+     shrinkage = target_shrinkage
+   )),
+   min_n = result$sample_size,
+   per_param = round(min_n / parameters, 1)
+ ) |>
+ ungroup() |>
+ select(parameters, min_n, per_param)
+
+knitr::kable(
+ sensitivity_params,
+ caption = "Development sample size by number of parameters",
+ col.names = c("Parameters", "Min N", "Per Parameter")
+)
+```
+
+### Varying Outcome Variability (SD)
+
+```{r}
+#| label: sensitivity-sd
+
+sensitivity_sd <- tibble(
+ sd = c(1.5, 2.0, 2.2, 2.5, 3.0)
+) |>
+ rowwise() |>
+ mutate(
+   cv = round(sd / mean_new_lesions, 2),
+   result = list(pmsampsize::pmsampsize(
+     type = "c",
+     rsquared = expected_rsquared,
+     parameters = candidate_parameters,
+     intercept = mean_new_lesions,
+     sd = sd,
+     shrinkage = target_shrinkage
+   )),
+   min_n = result$sample_size
+ ) |>
+ ungroup() |>
+ select(sd, cv, min_n)
+
+knitr::kable(
+ sensitivity_sd,
+ caption = "Development sample size by outcome standard deviation",
+ col.names = c("SD", "CV", "Min N")
+)
+```
+
+## Summary Table
+
+```{r}
+#| label: summary
+#| echo: false
+
+tibble(
+ Item = c(
+   "Mean outcome (new lesions)",
+   "SD of outcome",
+   "Coefficient of variation",
+   "Candidate parameters",
+   "Expected R-squared",
+   "Target shrinkage",
+   "**Minimum sample size**",
+   "Participants per parameter"
+ ),
+ Value = c(
+   as.character(mean_new_lesions),
+   as.character(sd_new_lesions),
+   as.character(round(sd_new_lesions / mean_new_lesions, 2)),
+   as.character(candidate_parameters),
+   as.character(expected_rsquared),
+   as.character(target_shrinkage),
+   as.character(dev_sample$sample_size),
+   as.character(round(dev_sample$sample_size / candidate_parameters, 1))
+ ),
+ Source = c(
+   "Epidemiological estimate",
+   "Based on count data variability",
+   "Calculated",
+   "Based on predictor set",
+   "Conservative estimate",
+   "Riley et al. (2020)",
+   "pmsampsize",
+   "Calculated"
+ )
+) |>
+ knitr::kable(caption = "Summary of development sample size calculation")
+```
+
+## Key Points for DEVELOPMENT Studies (Continuous)
+
+1. **This is for MODEL DEVELOPMENT only**. External validation requires different calculations using `pmvalsampsize` (see Script 04).
+
+2. **R² is key**: For continuous outcomes, R² (proportion of variance explained) is the primary driver of sample size. Lower anticipated R² requires larger samples.
+
+3. **Criterion C2**: At minimum, N >= 234 + P participants are needed to precisely estimate the residual variance (for 10% margin of error).
+
+4. **Do NOT split data**: Use all data for development with internal validation via bootstrapping [@riley2020calculating].
+
+5. **Count data considerations**: If the outcome is truly count data (like number of lesions), consider Poisson or negative binomial regression. The sample size calculations here assume linear regression which may be appropriate if counts are sufficiently large and approximately normal.
+
+6. **Clinical context**: Based on Uribe et al. [@uribe2021global], with 48% global ECC prevalence, mean lesion counts of 1.8 are plausible for moderate-risk populations.
+
+## References
+
+::: {#refs}
+:::

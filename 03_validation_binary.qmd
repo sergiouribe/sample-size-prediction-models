@@ -1,0 +1,348 @@
+---
+title: "Sample Size for Model VALIDATION: Binary Outcome"
+subtitle: "External validation of caries prediction model"
+author: "Sergio Uribe"
+date: today
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    number-sections: true
+execute:
+  warning: false
+  message: false
+bibliography: references.bib
+---
+
+## Overview
+
+This document calculates the **minimum sample size required for EXTERNAL VALIDATION** of a prediction model with a **binary outcome**: whether a child will develop caries within 2 years (Yes/No).
+
+**Purpose**: External VALIDATION evaluates model performance in NEW data, separate from development. The sample size must allow precise estimation of performance measures.
+
+**Outcome definition**: Binary: "Child develops ≥1 new caries lesion in 2 years"
+
+**R Package**: `pmvalsampsize` [@riley2024evaluation]
+
+**Key criteria for validation sample size** (Riley et al. 2024, Figure 3):
+
+| Criterion | Description | Target CI Width |
+|-----------|-------------|-----------------|
+| 1 | Precise O/E (observed/expected) statistic | Context-specific |
+| 2 | Precise calibration slope | <= 0.3 (or <= 0.2) |
+| 3 | Precise C-statistic | <= 0.1 |
+| 4 | Precise net benefit (if relevant) | Context-specific |
+
+**Important**: Rules of thumb like "100 events and 100 non-events" are insufficient. Tailored calculations are needed.
+
+## Setup
+
+```{r}
+#| label: setup
+
+if (!require("pacman", quietly = TRUE)) {
+ install.packages("pacman", repos = "https://cloud.r-project.org")
+}
+
+pacman::p_load(
+ pmvalsampsize,
+ tidyverse
+)
+```
+
+## Tunable Assumptions
+
+```{r}
+#| label: assumptions
+
+# =============================================================================
+# OUTCOME CHARACTERISTICS IN VALIDATION POPULATION
+# =============================================================================
+
+# Outcome prevalence (event proportion) in the validation population
+# May differ from development population
+# Based on Uribe et al. (2021): global ECC prevalence is 48%
+outcome_prevalence <- 0.48
+
+# =============================================================================
+# EXPECTED MODEL PERFORMANCE IN VALIDATION
+# =============================================================================
+# Use values from development study (optimism-adjusted) or prior validation
+
+# Expected C-statistic in validation population
+# Typically similar to or slightly lower than development
+expected_cstatistic <- 0.70
+
+# Expected calibration slope
+# 1.0 = perfect calibration (recommended starting assumption)
+# Values < 1 indicate overfitting in development
+expected_cal_slope <- 1.0
+
+# Expected observed/expected (O/E) ratio
+# 1.0 = well calibrated overall
+expected_oe <- 1.0
+
+# =============================================================================
+# TARGET PRECISION (CONFIDENCE INTERVAL WIDTHS)
+# =============================================================================
+
+# Target CI width for C-statistic
+# Riley et al. recommend <= 0.1
+ci_width_cstat <- 0.10
+
+# Target CI width for calibration slope
+# Riley et al. recommend <= 0.3 (or <= 0.2 for stricter)
+ci_width_cal_slope <- 0.30
+
+# Target CI width for O/E ratio (on log scale)
+# Context-specific based on outcome prevalence
+# For prevalence ~0.5, CI width ~0.22 corresponds to ~0.05 absolute error
+ci_width_oe <- 0.22
+```
+
+## Sample Size Calculation
+
+The `pmvalsampsize` function evaluates multiple criteria and returns the maximum.
+
+```{r}
+#| label: calculation
+
+val_sample <- pmvalsampsize::pmvalsampsize(
+ type = "b",
+ prevalence = outcome_prevalence,
+ cstatistic = expected_cstatistic,
+ lpnorm = c(0, 1),
+ oeciwidth = ci_width_oe,
+ csciwidth = ci_width_cal_slope,
+ cstatciwidth = ci_width_cstat
+)
+
+val_sample
+```
+
+## Results Interpretation
+
+```{r}
+#| label: results
+#| echo: false
+
+cat("============================================================\n")
+cat("MODEL VALIDATION - BINARY OUTCOME\n")
+cat("Sample Size Requirements (Riley et al. 2024)\n")
+cat("============================================================\n\n")
+
+cat("MINIMUM SAMPLE SIZE:", val_sample$sample_size, "participants\n")
+cat("MINIMUM EVENTS:", val_sample$events, "children with caries\n")
+cat("MINIMUM NON-EVENTS:", val_sample$sample_size - val_sample$events, "caries-free\n\n")
+
+cat("Comparison with rules of thumb:\n")
+cat("  - '100 events + 100 non-events' rule:", 200, "participants\n")
+cat("  - '200 events + 200 non-events' rule:", 400, "participants\n")
+cat("  - Riley criteria requirement:", val_sample$sample_size, "participants\n")
+```
+
+## Detailed Criteria Results
+
+```{r}
+#| label: criteria-table
+
+# Display the results table directly from pmvalsampsize output
+knitr::kable(
+ val_sample$results_table,
+ caption = "Sample size by criterion (maximum determines final requirement)"
+)
+```
+
+## Sensitivity Analysis
+
+### Varying Prevalence
+
+```{r}
+#| label: sensitivity-prevalence
+
+sensitivity_prev <- tibble(
+ prevalence = c(0.20, 0.30, 0.40, 0.48, 0.55, 0.60)
+) |>
+ rowwise() |>
+ mutate(
+   result = list(pmvalsampsize::pmvalsampsize(
+     type = "b",
+     prevalence = prevalence,
+     cstatistic = expected_cstatistic,
+     lpnorm = c(0, 1),
+     oeciwidth = ci_width_oe,
+     csciwidth = ci_width_cal_slope,
+     cstatciwidth = ci_width_cstat
+   )),
+   min_n = result$sample_size,
+   min_events = result$events
+ ) |>
+ ungroup() |>
+ select(prevalence, min_n, min_events)
+
+knitr::kable(
+ sensitivity_prev,
+ caption = "Validation sample size by outcome prevalence",
+ col.names = c("Prevalence", "Min N", "Events")
+)
+```
+
+### Varying Expected C-statistic
+
+```{r}
+#| label: sensitivity-cstat
+
+sensitivity_cstat <- tibble(
+ cstatistic = c(0.60, 0.65, 0.70, 0.75, 0.80)
+) |>
+ rowwise() |>
+ mutate(
+   result = list(pmvalsampsize::pmvalsampsize(
+     type = "b",
+     prevalence = outcome_prevalence,
+     cstatistic = cstatistic,
+     lpnorm = c(0, 1),
+     oeciwidth = ci_width_oe,
+     csciwidth = ci_width_cal_slope,
+     cstatciwidth = ci_width_cstat
+   )),
+   min_n = result$sample_size,
+   min_events = result$events
+ ) |>
+ ungroup() |>
+ select(cstatistic, min_n, min_events)
+
+knitr::kable(
+ sensitivity_cstat,
+ caption = "Validation sample size by expected C-statistic",
+ col.names = c("C-statistic", "Min N", "Events")
+)
+```
+
+### Varying Target Precision for Calibration Slope
+
+```{r}
+#| label: sensitivity-calslope
+
+sensitivity_cal <- tibble(
+ cs_ciwidth = c(0.20, 0.25, 0.30, 0.35, 0.40)
+) |>
+ rowwise() |>
+ mutate(
+   result = list(pmvalsampsize::pmvalsampsize(
+     type = "b",
+     prevalence = outcome_prevalence,
+     cstatistic = expected_cstatistic,
+     lpnorm = c(0, 1),
+     oeciwidth = ci_width_oe,
+     csciwidth = cs_ciwidth,
+     cstatciwidth = ci_width_cstat
+   )),
+   min_n = result$sample_size,
+   min_events = result$events
+ ) |>
+ ungroup() |>
+ select(cs_ciwidth, min_n, min_events)
+
+knitr::kable(
+ sensitivity_cal,
+ caption = "Validation sample size by target calibration slope CI width",
+ col.names = c("Cal Slope CI Width", "Min N", "Events")
+)
+```
+
+## Summary Table
+
+```{r}
+#| label: summary
+#| echo: false
+
+tibble(
+ Item = c(
+   "Outcome prevalence",
+   "Expected C-statistic",
+   "Expected calibration slope",
+   "Target C-statistic CI width",
+   "Target calibration slope CI width",
+   "Target O/E CI width",
+   "**Minimum sample size**",
+   "**Required events (patients)**",
+   "**Required non-events (Patients caries-free)**"
+ ),
+ Value = c(
+   as.character(outcome_prevalence),
+   as.character(expected_cstatistic),
+   as.character(expected_cal_slope),
+   as.character(ci_width_cstat),
+   as.character(ci_width_cal_slope),
+   as.character(ci_width_oe),
+   as.character(val_sample$sample_size),
+   as.character(val_sample$events),
+   as.character(val_sample$sample_size - val_sample$events)
+ ),
+ Source = c(
+   "Uribe et al. (2021) / local data",
+   "From development study",
+   "Assume well-calibrated",
+   "Riley et al. (2024)",
+   "Riley et al. (2024)",
+   "Based on prevalence",
+   "pmvalsampsize",
+   "pmvalsampsize",
+   "Calculated"
+ )
+) |>
+ knitr::kable(caption = "Summary of validation sample size calculation")
+```
+
+## Key Points for VALIDATION Studies
+
+1. **This is for EXTERNAL VALIDATION only**. Model development requires different calculations using `pmsampsize` (see Scripts 01-02).
+
+2. **Different from development**: Validation sample size depends on target PRECISION of performance estimates, not on model complexity.
+
+3. **Rules of thumb are inadequate**: "100 events and 100 non-events" often produces imprecise performance estimates. Tailored calculations account for expected performance and target precision.
+
+4. **Calibration is often the driver**: Sample sizes for precise calibration slope estimates are typically larger than for C-statistic.
+
+5. **Linear predictor distribution**: The `lpnorm = c(0, 1)` assumes a normal distribution of predictions on the log-odds scale. If you have the actual distribution from development, use `lpbeta()` for more accurate estimates.
+
+6. **Validation data should be independent**: Validation data must be separate from development data, ideally from a different setting, time, or population [@riley2024evaluation].
+
+# Technical Note: Unit of Analysis and Clustering in Dental Data
+
+The sample size formulas in this document assume **independent observations**. In dental research, data often has a hierarchical structure that violates this assumption:
+
+- Surfaces are nested within teeth
+- Teeth are nested within patients
+- Risk factors (e.g., sugar consumption, fluoride exposure) affect all teeth/surfaces within a patient
+
+### Adjustment for Tooth-Level or Surface-Level Analysis
+
+If your outcome is measured at the tooth or surface level, the formulas **underestimate** the required sample size. Account for clustering using the design effect:
+
+$$n_{adjusted} = n_{calculated} \times [1 + (m - 1) \times ICC]$$
+
+Where:
+
+- $m$ = average number of teeth or surfaces per patient
+- $ICC$ = intra-class correlation (typically 0.1–0.4 for dental caries)
+
+**Example**: If the calculation (assuming independence) yields n = 500 teeth, but teeth are clustered within patients with m = 20 teeth and ICC = 0.2:
+
+$$DEFF = 1 + (20-1) \times 0.2 = 4.8$$
+
+$$n_{adjusted} = 500 \times 4.8 = 2400 \text{ teeth}$$
+
+**Comparison**:
+
+- Without clustering adjustment: 500 teeth = 25 patients
+- With clustering adjustment: 2400 teeth = **120 patients**
+
+Clustering requires **approximately 5× more patients** to achieve the same statistical precision.
+
+## References
+
+::: {#refs}
+:::

@@ -1,0 +1,331 @@
+---
+title: "Sample Size for Model VALIDATION: Continuous Outcome"
+subtitle: "External validation of caries lesion count prediction model"
+author: "Sergio Uribe"
+date: today
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    number-sections: true
+execute:
+  warning: false
+  message: false
+bibliography: references.bib
+---
+
+## Overview
+
+This document calculates the **minimum sample size required for EXTERNAL VALIDATION** of a prediction model with a **continuous outcome**: number of new caries lesions over 2 years.
+
+**Purpose**: External VALIDATION evaluates model performance in NEW data, separate from development. The sample size must allow precise estimation of performance measures.
+
+**Outcome definition**: Continuous: "Number of new caries lesions per child in 2 years"
+
+**Unity of analysis**: Patient
+
+**R Package**: `pmvalsampsize` [@riley2024evaluation]
+
+**Key criteria for validation sample size** (Riley et al. 2024, Figure 2):
+
+| Criterion | Description | Target |
+|-----------|-------------|--------|
+| 1 | Precise R² estimation | CI width <= 0.1 |
+| 2 | Precise calibration-in-the-large | Context-specific |
+| 3 | Precise calibration slope | CI width <= 0.3 |
+| 4 | Precise residual variance | Margin of error <= 10% |
+
+## Setup
+
+```{r}
+#| label: setup
+
+if (!require("pacman", quietly = TRUE)) {
+ install.packages("pacman", repos = "https://cloud.r-project.org")
+}
+
+pacman::p_load(
+ pmvalsampsize,
+ tidyverse
+)
+```
+
+## Tunable Assumptions
+
+```{r}
+#| label: assumptions
+
+# =============================================================================
+# OUTCOME CHARACTERISTICS IN VALIDATION POPULATION
+# =============================================================================
+
+# Variance of outcome values in the validation population
+# Based on development study or prior knowledge
+# SD = 2.2, so Variance = 2.2^2 = 4.84
+outcome_variance <- 4.84
+
+# =============================================================================
+# EXPECTED MODEL PERFORMANCE IN VALIDATION
+# =============================================================================
+# Use values from development study (optimism-adjusted)
+
+# Expected R-squared in validation population
+# Should use optimism-adjusted estimate from development
+# For caries models, typically 0.10-0.30
+expected_rsquared <- 0.15
+
+# Expected calibration slope
+# 1.0 = perfect calibration (recommended starting assumption)
+expected_cal_slope <- 1.0
+
+# Expected calibration-in-the-large
+# 0 = no systematic over/under-prediction
+expected_citl <- 0
+
+# =============================================================================
+# TARGET PRECISION (CONFIDENCE INTERVAL WIDTHS)
+# =============================================================================
+
+# Target CI width for R-squared
+# Riley et al. recommend <= 0.1
+ci_width_rsquared <- 0.10
+
+# Target CI width for calibration slope
+# Riley et al. recommend <= 0.3 (or <= 0.2 for stricter)
+ci_width_cal_slope <- 0.30
+
+# Target CI width for calibration-in-the-large
+# Context-specific: depends on outcome scale
+# For lesion counts (0-20 range), CI width of 0.5 lesions is reasonable
+ci_width_citl <- 0.5
+```
+
+## Sample Size Calculation
+
+The `pmvalsampsize` function evaluates all four criteria and returns the maximum.
+
+```{r}
+#| label: calculation
+
+val_sample <- pmvalsampsize::pmvalsampsize(
+ type = "c",
+ rsquared = expected_rsquared,
+ varobs = outcome_variance,
+ citlciwidth = ci_width_citl,
+ csciwidth = ci_width_cal_slope
+)
+
+val_sample
+```
+
+## Results Interpretation
+
+```{r}
+#| label: results
+#| echo: false
+
+cat("============================================================\n")
+cat("MODEL VALIDATION - CONTINUOUS OUTCOME\n")
+cat("Sample Size Requirements (Riley et al. 2024)\n")
+cat("============================================================\n\n")
+
+cat("MINIMUM SAMPLE SIZE:", val_sample$sample_size, "participants\n\n")
+
+cat("This sample size ensures precise estimation of:\n")
+cat("  - R-squared (CI width <=", ci_width_rsquared, ")\n")
+cat("  - Calibration slope (CI width <=", ci_width_cal_slope, ")\n")
+cat("  - Calibration-in-the-large (CI width <=", ci_width_citl, "lesions)\n")
+cat("  - Residual variance (margin of error <= 10%)\n")
+```
+
+## Detailed Criteria Results
+
+```{r}
+#| label: criteria-table
+
+# Display the results table directly from pmvalsampsize output
+knitr::kable(
+ val_sample$results_table,
+ caption = "Sample size by criterion (maximum determines final requirement)"
+)
+```
+
+## Sensitivity Analysis
+
+### Varying Expected R²
+
+```{r}
+#| label: sensitivity-rsquared
+
+sensitivity_rsq <- tibble(
+ rsquared = c(0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40)
+) |>
+ rowwise() |>
+ mutate(
+   result = list(pmvalsampsize::pmvalsampsize(
+     type = "c",
+     rsquared = rsquared,
+     varobs = outcome_variance,
+     citlciwidth = ci_width_citl,
+     csciwidth = ci_width_cal_slope
+   )),
+   min_n = result$sample_size
+ ) |>
+ ungroup() |>
+ select(rsquared, min_n)
+
+knitr::kable(
+ sensitivity_rsq,
+ caption = "Validation sample size by expected R-squared",
+ col.names = c("R-squared", "Min N")
+)
+```
+
+### Varying Outcome Variance
+
+```{r}
+#| label: sensitivity-variance
+
+sensitivity_var <- tibble(
+ sd = c(1.5, 2.0, 2.2, 2.5, 3.0, 3.5),
+ variance = sd^2
+) |>
+ rowwise() |>
+ mutate(
+   result = list(pmvalsampsize::pmvalsampsize(
+     type = "c",
+     rsquared = expected_rsquared,
+     varobs = variance,
+     citlciwidth = ci_width_citl,
+     csciwidth = ci_width_cal_slope
+   )),
+   min_n = result$sample_size
+ ) |>
+ ungroup() |>
+ select(sd, variance, min_n)
+
+knitr::kable(
+ sensitivity_var,
+ caption = "Validation sample size by outcome variability",
+ col.names = c("SD", "Variance", "Min N")
+)
+```
+
+### Varying Target Precision for Calibration Slope
+
+```{r}
+#| label: sensitivity-calslope
+
+sensitivity_cal <- tibble(
+ cs_ciwidth = c(0.15, 0.20, 0.25, 0.30, 0.35, 0.40)
+) |>
+ rowwise() |>
+ mutate(
+   result = list(pmvalsampsize::pmvalsampsize(
+     type = "c",
+     rsquared = expected_rsquared,
+     varobs = outcome_variance,
+     citlciwidth = ci_width_citl,
+     csciwidth = cs_ciwidth
+   )),
+   min_n = result$sample_size
+ ) |>
+ ungroup() |>
+ select(cs_ciwidth, min_n)
+
+knitr::kable(
+ sensitivity_cal,
+ caption = "Validation sample size by target calibration slope CI width",
+ col.names = c("Cal Slope CI Width", "Min N")
+)
+```
+
+### Varying Target Precision for CITL
+
+```{r}
+#| label: sensitivity-citl
+
+sensitivity_citl <- tibble(
+ citl_ciwidth = c(0.25, 0.50, 0.75, 1.0, 1.5)
+) |>
+ rowwise() |>
+ mutate(
+   result = list(pmvalsampsize::pmvalsampsize(
+     type = "c",
+     rsquared = expected_rsquared,
+     varobs = outcome_variance,
+     citlciwidth = citl_ciwidth,
+     csciwidth = ci_width_cal_slope
+   )),
+   min_n = result$sample_size
+ ) |>
+ ungroup() |>
+ select(citl_ciwidth, min_n)
+
+knitr::kable(
+ sensitivity_citl,
+ caption = "Validation sample size by target CITL CI width (lesion units)",
+ col.names = c("CITL CI Width", "Min N")
+)
+```
+
+## Summary Table
+
+```{r}
+#| label: summary
+#| echo: false
+
+tibble(
+ Item = c(
+   "Outcome variance",
+   "Outcome SD",
+   "Expected R-squared",
+   "Expected calibration slope",
+   "Target R-squared CI width",
+   "Target calibration slope CI width",
+   "Target CITL CI width",
+   "**Minimum sample size**"
+ ),
+ Value = c(
+   as.character(outcome_variance),
+   as.character(round(sqrt(outcome_variance), 2)),
+   as.character(expected_rsquared),
+   as.character(expected_cal_slope),
+   as.character(ci_width_rsquared),
+   as.character(ci_width_cal_slope),
+   as.character(ci_width_citl),
+   as.character(val_sample$sample_size)
+ ),
+ Source = c(
+   "From development study",
+   "Calculated",
+   "Optimism-adjusted from development",
+   "Assume well-calibrated",
+   "Riley et al. (2024)",
+   "Riley et al. (2024)",
+   "Based on outcome scale",
+   "pmvalsampsize"
+ )
+) |>
+ knitr::kable(caption = "Summary of validation sample size calculation")
+```
+
+## Key Points for VALIDATION Studies (Continuous)
+
+1. **This is for EXTERNAL VALIDATION only**. Model development requires different calculations using `pmsampsize` (see Scripts 01-02).
+
+2. **R² drives sample size**: For continuous outcomes with moderate R², very large samples (hundreds to thousands) may be needed to estimate R² precisely.
+
+3. **Calibration-in-the-large**: The CI width for CITL should be interpretable on the outcome scale. For lesion counts, a width of 0.5 lesions means we can detect systematic prediction errors of about 0.25 lesions.
+
+4. **At least 235 participants**: Criterion 4 requires at least 235 participants to estimate residual variance with 10% margin of error, regardless of other assumptions.
+
+5. **Outcome variance**: The sample size calculation requires variance (SD²) of outcome values in the validation population. This should match the validation setting, which may differ from development.
+
+6. **Validation data should be independent**: Validation data must be separate from development data, ideally from a different setting, time, or population [@riley2024evaluation].
+
+## References
+
+::: {#refs}
+:::

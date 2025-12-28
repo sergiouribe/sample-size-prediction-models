@@ -1,0 +1,353 @@
+---
+title: "Sample Size for Model DEVELOPMENT: Binary Outcome"
+subtitle: "Predicting caries incidence in caries-free children"
+author: "Sergio Uribe"
+date: today
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    number-sections: true
+execute:
+  warning: false
+  message: false
+bibliography: references.bib
+---
+
+## Overview
+
+This document calculates the **minimum sample size required for DEVELOPING** a prediction model with a **binary outcome**: whether a caries-free child will develop caries within 2 years (Yes/No).
+
+**Purpose**: Model DEVELOPMENT requires sufficient sample size to build a reliable prediction equation that minimizes overfitting and produces accurate predictions when applied to new individuals.
+
+**Outcome definition**: Binary: "Child develops ≥1 new caries lesion in 2 years"
+
+**R Package**: `pmsampsize` [@riley2020calculating]
+
+**Key criteria for development sample size** (Riley et al. 2020, Box 1):
+
+| Criterion | Description | Target |
+|-----------|-------------|--------|
+| B1 | Precise estimation of overall outcome proportion | Margin of error ≤ 0.05 |
+| B2 | Small mean absolute prediction error (MAPE) | MAPE ≤ 0.05 |
+| B3 | Small shrinkage factor to minimize overfitting | Shrinkage ≥ 0.90 |
+| B4 | Small optimism in apparent R²~Nagelkerke~ | Optimism ≤ 0.05 |
+
+## Setup
+
+```{r}
+#| label: setup
+
+if (!require("pacman", quietly = TRUE)) {
+ install.packages("pacman", repos = "https://cloud.r-project.org")
+}
+
+pacman::p_load(
+ pmsampsize,
+ tidyverse
+)
+```
+
+## Tunable Assumptions
+
+```{r}
+#| label: assumptions
+
+# =============================================================================
+# OUTCOME CHARACTERISTICS
+# =============================================================================
+
+# Outcome prevalence (proportion with outcome in target population)
+# Based on Uribe et al. (2021): global ECC prevalence is 48%
+# Adjust based on your specific population risk profile
+outcome_prevalence <- 0.48
+
+# =============================================================================
+# MODEL COMPLEXITY
+# =============================================================================
+
+# Number of candidate predictor PARAMETERS (not variables!)
+# Count each parameter:
+#   - Binary variable = 1 parameter
+#   - Categorical (k levels) = k-1 parameters
+#   - Continuous variable = 1 parameter (more if using splines)
+#   - Each interaction term = 1 parameter
+#
+# Example for caries prediction:
+#   Age (continuous) = 1
+#   Sex (binary) = 1
+#   SES (3 categories) = 2
+#   Fluoride exposure (binary) = 1
+#   Brushing frequency (4 categories) = 3
+#   Sugar intake (continuous) = 1
+#   Baseline dmft (continuous) = 1
+#   S. mutans level (continuous) = 1
+#   Plaque index (continuous) = 1
+#   Parent caries (binary) = 1
+#   Dental visits (3 categories) = 2
+#   Sealants (binary) = 1
+#   Total = 16 parameters
+candidate_parameters <- 16
+
+# =============================================================================
+# EXPECTED MODEL PERFORMANCE
+# =============================================================================
+
+# Option A: Specify expected C-statistic (AUC)
+# For caries prediction, literature reports 0.65-0.80
+# Use CONSERVATIVE (lower) estimates to ensure adequate sample size
+expected_cstatistic <- 0.70
+
+# Option B: Alternatively, specify Cox-Snell R-squared directly
+# Can be derived from existing models or estimated
+# If using this option, comment out cstatistic and use rsquared parameter
+# expected_csrsquared <- 0.10
+
+# =============================================================================
+# OVERFITTING CONTROL
+# =============================================================================
+
+# Target shrinkage factor (controls maximum acceptable overfitting)
+#   0.90 = maximum 10% shrinkage (RECOMMENDED by Riley et al.)
+#   0.85 = allows 15% shrinkage
+#   0.95 = stricter, only 5% shrinkage allowed
+target_shrinkage <- 0.90
+```
+
+## Sample Size Calculation
+
+The `pmsampsize` function evaluates criteria B1, B3, and B4. Criterion B2 requires a separate calculation.
+
+```{r}
+#| label: calculation
+
+# Main calculation using C-statistic approach
+dev_sample <- pmsampsize::pmsampsize(
+ type = "b",
+ cstatistic = expected_cstatistic,
+ parameters = candidate_parameters,
+ prevalence = outcome_prevalence,
+ shrinkage = target_shrinkage
+)
+
+dev_sample
+```
+
+## Results Interpretation
+
+```{r}
+#| label: results
+#| echo: false
+
+cat("============================================================\n")
+cat("MODEL DEVELOPMENT - BINARY OUTCOME\n")
+cat("Sample Size Requirements (Riley et al. 2020)\n")
+cat("============================================================\n\n")
+
+cat("MINIMUM SAMPLE SIZE:", dev_sample$sample_size, "participants\n")
+cat("MINIMUM EVENTS:", dev_sample$events, "children with caries\n")
+cat("MINIMUM NON-EVENTS:", dev_sample$sample_size - dev_sample$events, "caries-free\n")
+cat("EVENTS PER PARAMETER:", round(dev_sample$events / candidate_parameters, 1), "\n\n")
+
+cat("Comparison with rules of thumb:\n")
+cat("  - Traditional '10 EPV rule':", candidate_parameters * 10, "events\n")
+cat("  - Riley criteria requirement:", dev_sample$events, "events\n")
+```
+
+## Detailed Criteria Results
+
+```{r}
+#| label: criteria-table
+
+# Display the results table directly from pmsampsize output
+knitr::kable(
+ dev_sample$results_table,
+ caption = "Sample size by criterion (maximum determines final requirement)"
+)
+```
+
+## Sensitivity Analysis
+
+### Varying Prevalence
+
+```{r}
+#| label: sensitivity-prevalence
+
+sensitivity_prev <- tibble(
+ prevalence = c(0.20, 0.30, 0.40, 0.48, 0.55, 0.60)
+) |>
+ rowwise() |>
+ mutate(
+   result = list(pmsampsize::pmsampsize(
+     type = "b",
+     cstatistic = expected_cstatistic,
+     parameters = candidate_parameters,
+     prevalence = prevalence,
+     shrinkage = target_shrinkage
+   )),
+   min_n = result$sample_size,
+   min_events = result$events,
+   epp = round(min_events / candidate_parameters, 1)
+ ) |>
+ ungroup() |>
+ select(prevalence, min_n, min_events, epp)
+
+knitr::kable(
+ sensitivity_prev,
+ caption = "Development sample size by outcome prevalence",
+ col.names = c("Prevalence", "Min N", "Events", "EPP")
+)
+```
+
+### Varying C-statistic
+
+```{r}
+#| label: sensitivity-cstat
+
+sensitivity_cstat <- tibble(
+ cstatistic = c(0.60, 0.65, 0.70, 0.75, 0.80)
+) |>
+ rowwise() |>
+ mutate(
+   result = list(pmsampsize::pmsampsize(
+     type = "b",
+     cstatistic = cstatistic,
+     parameters = candidate_parameters,
+     prevalence = outcome_prevalence,
+     shrinkage = target_shrinkage
+   )),
+   min_n = result$sample_size,
+   min_events = result$events
+ ) |>
+ ungroup() |>
+ select(cstatistic, min_n, min_events)
+
+knitr::kable(
+ sensitivity_cstat,
+ caption = "Development sample size by expected C-statistic (lower = more conservative)",
+ col.names = c("C-statistic", "Min N", "Events")
+)
+```
+
+### Varying Number of Parameters
+
+```{r}
+#| label: sensitivity-params
+
+sensitivity_params <- tibble(
+ parameters = c(8, 12, 16, 20, 25, 30)
+) |>
+ rowwise() |>
+ mutate(
+   result = list(pmsampsize::pmsampsize(
+     type = "b",
+     cstatistic = expected_cstatistic,
+     parameters = parameters,
+     prevalence = outcome_prevalence,
+     shrinkage = target_shrinkage
+   )),
+   min_n = result$sample_size,
+   min_events = result$events,
+   epp = round(min_events / parameters, 1)
+ ) |>
+ ungroup() |>
+ select(parameters, min_n, min_events, epp)
+
+knitr::kable(
+ sensitivity_params,
+ caption = "Development sample size by number of parameters",
+ col.names = c("Parameters", "Min N", "Events", "EPP")
+)
+```
+
+## Summary Table
+
+```{r}
+#| label: summary
+#| echo: false
+
+tibble(
+ Item = c(
+   "Outcome prevalence",
+   "Candidate parameters",
+   "Expected C-statistic",
+   "Target shrinkage",
+   "**Minimum sample size**",
+   "**Required events (patients)**",
+   "Events (patients) per parameter"
+ ),
+ Value = c(
+   as.character(outcome_prevalence),
+   as.character(candidate_parameters),
+   as.character(expected_cstatistic),
+   as.character(target_shrinkage),
+   as.character(dev_sample$sample_size),
+   as.character(dev_sample$events),
+   as.character(round(dev_sample$events / candidate_parameters, 1))
+ ),
+ Source = c(
+   "Uribe et al. (2021)",
+   "Based on predictor set",
+   "Conservative estimate",
+   "Riley et al. (2020)",
+   "pmsampsize",
+   "pmsampsize",
+   "Calculated"
+ )
+) |>
+ knitr::kable(caption = "Summary of development sample size calculation")
+```
+
+## Key Points for DEVELOPMENT Studies
+
+1. **This is for MODEL DEVELOPMENT only**. External validation requires different calculations using `pmvalsampsize` (see Script 03).
+
+2. **Do NOT split data**: Use all data for development with internal validation via bootstrapping [@riley2020calculating].
+
+3. **EPP varies by context**: The required events per parameter depends on prevalence and expected performance, not a fixed "10 EPV" rule.
+
+4. **Machine learning methods** may require 10x larger samples than logistic regression [@vanderploeg2014modern].
+
+5. **Conservative estimates**: Lower anticipated C-statistics lead to larger required sample sizes. Being conservative protects against overfitting.
+
+6. **Baseline prevalence of 48%** is from the global ECC systematic review [@uribe2021global].
+
+7. **Events** here means PATIENTS, since is there where we will take the decision!
+
+# Technical Note: Unit of Analysis and Clustering in Dental Data
+
+The sample size formulas in this document assume **independent observations**. In dental research, data often has a hierarchical structure that violates this assumption:
+
+- Surfaces are nested within teeth
+- Teeth are nested within patients
+- Risk factors (e.g., sugar consumption, fluoride exposure) affect all teeth/surfaces within a patient
+
+### Adjustment for Tooth-Level or Surface-Level Analysis
+
+If your outcome is measured at the tooth or surface level, the formulas **underestimate** the required sample size. Account for clustering using the design effect:
+
+$$n_{adjusted} = n_{calculated} \times [1 + (m - 1) \times ICC]$$
+
+Where:
+
+- $m$ = average number of teeth or surfaces per patient
+- $ICC$ = intra-class correlation (typically 0.1–0.4 for dental caries)
+
+**Example**: If the calculation (assuming independence) yields n = 500 teeth, but teeth are clustered within patients with m = 20 teeth and ICC = 0.2:
+
+$$DEFF = 1 + (20-1) \times 0.2 = 4.8$$
+
+$$n_{adjusted} = 500 \times 4.8 = 2400 \text{ teeth}$$
+
+**Comparison**:
+
+- Without clustering adjustment: 500 teeth = 25 patients
+- With clustering adjustment: 2400 teeth = **120 patients**
+
+Clustering requires **approximately 5× more patients** to achieve the same statistical precision.
+
+## References
+
+::: {#refs}
+:::
